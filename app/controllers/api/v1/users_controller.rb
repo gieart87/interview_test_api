@@ -1,12 +1,15 @@
 module Api
   module V1
     class UsersController < BaseController
-      before_action :set_user, only: [:show, :update, :destroy]
+      before_action :set_cached_user, only: [:show]
+      before_action :set_user, only: [:update, :destroy]
 
       # GET /api/v1/users
       def index
-        @users = User.all
-        render json: @users
+        users = AppCache.fetch("users_all", expires_in: 5.minutes) do
+          User.all.as_json
+        end
+        render json: users
       end
 
       # GET /api/v1/users/1
@@ -19,6 +22,7 @@ module Api
         @user = User.new(user_params)
 
         if @user.save
+          AppCache.delete("users_all")
           render json: @user, status: :created
         else
           render json: { errors: @user.errors.full_messages }, status: :unprocessable_entity
@@ -28,6 +32,8 @@ module Api
       # PATCH/PUT /api/v1/users/1
       def update
         if @user.update(user_params)
+          AppCache.delete("users_all")
+          AppCache.delete("user_#{@user.id}")
           render json: @user
         else
           render json: { errors: @user.errors.full_messages }, status: :unprocessable_entity
@@ -37,6 +43,8 @@ module Api
       # DELETE /api/v1/users/1
       def destroy
         @user.destroy
+        AppCache.delete("users_all")
+        AppCache.delete("user_#{@user.id}")
         head :no_content
       end
 
@@ -46,6 +54,11 @@ module Api
         @user = User.find(params[:id])
       end
 
+      def set_cached_user
+        @user = AppCache.fetch("user_#{params[:id]}", expires_in: 10.minutes) do
+          User.includes(:jobs).find(params[:id])
+        end
+      end
       def user_params
         params.require(:user).permit(:name, :email, :phone)
       end
